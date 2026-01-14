@@ -1,0 +1,546 @@
+openapi: 3.0.3
+info:
+  title: Inventory Server MVP API
+  version: 0.1.0
+  description: |
+    在庫サーバーAPI。
+    認証はSession Cookieを使用。
+
+servers:
+  - url: http://localhost:8080
+    description: local
+
+tags:
+  - name: Auth
+  - name: Products
+  - name: Inventories
+  - name: Stock
+  - name: StockMovements
+
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      tags: [Auth]
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+              example:
+                ok: true
+
+  /api/auth/login:
+    post:
+      summary: Login
+      description: メールとパスワードでログインし、Set-Cookieで session_id を返す。
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+            example:
+              email: admin@example.com
+              password: admin0001
+      responses:
+        "200":
+          description: Logged in
+          headers:
+            Set-Cookie:
+              description: session_id Cookie（HttpOnly）
+              schema:
+                type: string
+            X-Request-Id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+              example:
+                user:
+                  id: 2bdc385b-0ca3-42a4-94d2-039618b84fff
+                  email: admin@example.com
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/auth/logout:
+    post:
+      summary: Logout
+      description: セッションを無効化し、Cookie を削除。
+      tags: [Auth]
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Logged out
+          headers:
+            Set-Cookie:
+              description: session_id を削除する Cookie（Max-Age=-1）
+              schema:
+                type: string
+            X-Request-Id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+              example:
+                ok: true
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/auth/me:
+    get:
+      summary: Get current user
+      description: ログイン中のユーザー情報を返す。
+      tags: [Auth]
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+
+  /api/products:
+    post:
+      summary: Create product (with zero inventory)
+      description: |
+        商品を作成し、同時に在庫を quantity=0 で作成（トランザクション）。
+      tags: [Products]
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProductRequest"
+            example:
+              name: CoffeeBeans-A
+      responses:
+        "201":
+          description: Created
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateProductResponse"
+              example:
+                product:
+                  id: 037bcd38-76f5-42db-b242-a99facb26e14
+                  name: CoffeeBeans-A
+                inventory:
+                  product_id: 037bcd38-76f5-42db-b242-a99facb26e14
+                  quantity: 0
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/inventories:
+    get:
+      summary: List inventories
+      description: 在庫一覧（product と quantity）を返します。
+      tags: [Inventories]
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListInventoriesResponse"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/stock/inbound:
+    post:
+      summary: Inbound (increase stock)
+      description: 在庫を増やし、履歴（stock_movements）も追加します（トランザクション）。
+      tags: [Stock]
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StockChangeRequest"
+            example:
+              product_id: 037bcd38-76f5-42db-b242-a99facb26e14
+              quantity: 5
+              reason: 仕入れ
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StockChangeResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/stock/outbound:
+    post:
+      summary: Outbound (decrease stock)
+      description: 在庫を減らし、履歴（stock_movements）も追加します（トランザクション）。在庫不足は 409。
+      tags: [Stock]
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StockChangeRequest"
+            example:
+              product_id: 037bcd38-76f5-42db-b242-a99facb26e14
+              quantity: 3
+              reason: 出荷
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StockChangeResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/InsufficientStock"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/stock_movements:
+    get:
+      summary: List stock movements
+      description: 在庫の増減履歴を新しい順で返します。limitで件数、product_idで絞り込み。
+      tags: [StockMovements]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: 1〜200（未指定は50）
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: product_id
+          in: query
+          required: false
+          description: 指定した場合はその商品の履歴のみ
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListStockMovementsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: session_id
+
+  headers:
+    XRequestId:
+      description: リクエスト追跡用ID
+      schema:
+        type: string
+
+  schemas:
+    OkResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+      required: [ok]
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+          required: [code, message]
+      required: [error]
+
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 1
+      required: [email, password]
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+      required: [id, email]
+
+    LoginResponse:
+      type: object
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+      required: [user]
+
+    CreateProductRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+      required: [name]
+
+    Product:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+      required: [id, name]
+
+    Inventory:
+      type: object
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+      required: [product_id, quantity]
+
+    CreateProductResponse:
+      type: object
+      properties:
+        product:
+          $ref: "#/components/schemas/Product"
+        inventory:
+          $ref: "#/components/schemas/Inventory"
+      required: [product, inventory]
+
+    InventoryItem:
+      type: object
+      properties:
+        product:
+          $ref: "#/components/schemas/Product"
+        quantity:
+          type: integer
+      required: [product, quantity]
+
+    ListInventoriesResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/InventoryItem"
+      required: [items]
+
+    StockChangeRequest:
+      type: object
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+        reason:
+          type: string
+      required: [product_id, quantity, reason]
+
+    StockMovement:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        delta:
+          type: integer
+        reason:
+          type: string
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+      required: [id, product_id, delta, reason, created_by, created_at]
+
+    StockChangeResponse:
+      type: object
+      properties:
+        inventory:
+          $ref: "#/components/schemas/Inventory"
+        movement:
+          $ref: "#/components/schemas/StockMovement"
+      required: [inventory, movement]
+
+    ListStockMovementsResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/StockMovement"
+      required: [items]
+
+  responses:
+    BadRequest:
+      description: Bad Request
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/XRequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: INVALID_REQUEST
+              message: 入力が不正です
+
+    Unauthenticated:
+      description: Unauthorized
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/XRequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: UNAUTHENTICATED
+              message: ログインしてください
+
+    NotFound:
+      description: Not Found
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/XRequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: NOT_FOUND
+              message: 対象が見つかりません
+
+    InsufficientStock:
+      description: Conflict (Insufficient stock)
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/XRequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: INSUFFICIENT_STOCK
+              message: 在庫が足りません
+
+    InternalError:
+      description: Internal Server Error
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/XRequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: INTERNAL_ERROR
+              message: サーバーエラーです

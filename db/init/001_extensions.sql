@@ -1,0 +1,2 @@
+-- UUID作成
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
