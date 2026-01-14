@@ -25,26 +25,28 @@ async function requestJson<TResponse>(
 ): Promise<TResponse> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
-    credentials: "include", //cookie保持
+    credentials: "include",
     headers: buildHeaders(init),
   });
 
   if (!res.ok) {
     const text = await res.text();
 
+    let parsed: unknown = null;
     try {
-      const parsed: unknown = JSON.parse(text);
-      if (typeof parsed === "object" && parsed !== null && "error" in parsed) {
-        const e = (parsed as { error?: { code?: string; message?: string } })
-          .error;
-        throw new Error(
-          `${e?.code ?? "ERROR"}: ${e?.message ?? "unknown error"}`
-        );
-      }
-      throw new Error(`HTTP ${res.status}: ${text}`);
+      parsed = JSON.parse(text);
     } catch {
-      throw new Error(`HTTP ${res.status}: ${text}`);
+      parsed = null;
     }
+
+    if (typeof parsed === "object" && parsed !== null && "error" in parsed) {
+      const obj = parsed as { error?: { code?: string; message?: string } };
+      const code = obj.error?.code ?? "ERROR";
+      const message = obj.error?.message ?? "unknown error";
+      throw new Error(`${code}: ${message}`);
+    }
+
+    throw new Error(`HTTP ${res.status}: ${text}`);
   }
 
   return (await res.json()) as TResponse;
